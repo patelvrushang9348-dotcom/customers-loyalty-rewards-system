@@ -3,6 +3,8 @@
 *.db-wal
 *.db-shm
 __pycache__/
+*.pyc
 .venv/
-demo_codes.txt
-*.zip
+venv/
+instance/
+.DS_Store
