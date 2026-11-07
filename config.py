@@ -26,6 +26,7 @@ DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "loyalty.db"))
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"  # set to 1 when served over HTTPS
 PORT = int(os.environ.get("PORT", "5000"))
 
 # Anti-fraud limits (see ASSUMPTIONS.md)
