@@ -30,7 +30,7 @@ function toast(text) {
 function table(heads, rows, empty) {
   if (!rows.length) return `<div class="empty">${esc(empty)}</div>`;
   return `<div class="table-wrap"><table><thead><tr>${heads.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>` +
-    rows.map(r => `<tr>${r.map((c, i) => `<td data-label="${esc(heads[i])}">${c}</td>`).join('')}</tr>`).join('') + `</tbody></table></div>`;
+    rows.map(r => `<tr>${r.map((c, i) => `<td data-label="${esc(heads[i])}"><div class="cell">${c}</div></td>`).join('')}</tr>`).join('') + `</tbody></table></div>`;
 }
 const statusTag = s => ({unused: 'ok', redeemed: 'warn', voided: 'bad', active: 'ok', pending: 'warn', fulfilled: 'ok', rejected: 'bad'}[s] || '');
 const tag = s => `<span class="tag ${statusTag(s)}">${esc(s)}</span>`;
@@ -158,7 +158,7 @@ function barChart(days) {
     days.map((d, i) => {
       const h = Math.round((d.count / max) * H);
       return `<rect x="${i * bw + 4}" y="${H - h}" width="${bw - 8}" height="${Math.max(h, 2)}" rx="2"><title>${d.day}: ${d.count}</title></rect>`;
-    }).join('') + `<text x="0" y="${H + 18}">${days[0].day.slice(5)}</text><text x="${W}" y="${H + 18}" text-anchor="end">${days.at(-1).day.slice(5)}</text><text x="${W}" y="12" text-anchor="end">peak ${max}</text></svg>`;
+    }).join('') + `<text x="0" y="${H + 18}">${days[0].day.slice(5)}</text><text x="${W}" y="${H + 18}" text-anchor="end">${days.at(-1).day.slice(5)}</text><text x="0" y="10">peak ${max}</text></svg>`;
 }
 
 async function adminOverview() {
