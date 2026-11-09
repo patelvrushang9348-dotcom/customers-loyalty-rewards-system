@@ -1,154 +1,111 @@
 # Architecture
 
-## Stack and why
+## Stack and reasons
+| Choice | Reason |
+|---|---|
+| **Python + Flask** | Small, readable, easy to explain end to end. The API is a handful of JSON endpoints. |
+| **SQLite (stdlib `sqlite3`)** | Zero setup, single file, ACID transactions and `BEGIN IMMEDIATE` give the exact atomicity needed for single-use codes. No ORM keeps every SQL statement visible and explainable. |
+| **Vanilla JS + CSS** | Two small pages. A framework and a build step would add moving parts with no benefit. Strict CSP: no inline scripts; all dynamic values are escaped. |
+| **Werkzeug password hashing (scrypt)** | Maintained, salted, slow by design. |
+| **HMAC-SHA256 with a secret pepper** | Used for stored code hashes and for the checksum characters. |
+| **unittest** | Standard library, runs anywhere. |
 
-| Layer | Choice | Reason |
-|---|---|---|
-| Backend | **Python 3 + Flask** | Small, readable, easy to explain line by line. Test client makes API tests fast. |
-| Database | **SQLite** (WAL mode) | No server to install, one file, real transactions and constraints. `BEGIN IMMEDIATE` gives the atomic redemption the design depends on. |
-| Front end | **Vanilla JavaScript + CSS**, hash router, no build step | Nothing to compile. Any grader can open it. Works on phones. Served by Flask as static files. |
-| Auth | Server-side signed session cookie (`HttpOnly`, `SameSite=Lax`), Werkzeug password hashing | No tokens in JavaScript, nothing to steal via XSS. |
-| Tests | Python `unittest` | Standard library, no extra install. |
-| Deploy | `gunicorn "app:create_app()"` | Standard WSGI. |
+Upgrade path: swap `app/db.py` for PostgreSQL (the SQL is mostly standard) when more than one server is needed.
 
-## Components
-
+## System diagram
 ```mermaid
 flowchart LR
-  subgraph Browser
-    UI[Customer + Owner UI<br/>HTML / CSS / JS]
-  end
-  subgraph Flask["Flask app (app.py)"]
-    AUTH[Auth + sessions]
-    RED[Redeem endpoint<br/>rate limits + atomic claim]
-    ADM[Admin endpoints<br/>batches, rewards, claims, alerts]
-  end
-  DB[(SQLite file<br/>loyalty.db)]
-  PRINT[Printer / packing line]
-  UI -- "JSON over HTTPS<br/>+ X-Requested-With" --> AUTH
-  UI --> RED
-  UI --> ADM
-  AUTH --> DB
-  RED --> DB
-  ADM --> DB
-  ADM -. "CSV of codes (shown once)" .-> PRINT
+    subgraph Browser
+      C[Customer page /]
+      A[Owner dashboard /admin]
+    end
+    subgraph Flask app
+      RC[routes_customer.py]
+      RA[routes_admin.py]
+      SEC[security.py<br/>code gen, HMAC, lockout]
+      DB[db.py<br/>connection + transactions]
+    end
+    S[(SQLite loyalty.db)]
+    P[Printer]
+    C -->|JSON| RC
+    A -->|JSON| RA
+    RC --> SEC
+    RA --> SEC
+    RC --> DB
+    RA --> DB
+    DB --> S
+    RA -. "CSV of new codes (shown once)" .-> P
 ```
 
-## How a customer proves a purchase (and why reuse fails)
-
+## Redemption flow (the fraud-critical path)
 ```mermaid
 sequenceDiagram
-  participant O as Owner
-  participant S as Server
-  participant D as Database
-  participant C as Customer
-  O->>S: Generate batch (product, qty)
-  S->>D: Store HMAC(code) + serial, status=unused
-  S-->>O: CSV of plain codes (only time they exist)
-  Note over O: Codes printed inside boxes
-  C->>S: Enter code (signed in)
-  S->>D: Count recent failures (user + IP)
-  alt over limit
-    S-->>C: 429 locked for 15 min
-  else ok
-    S->>D: Look up HMAC(code)
-    alt unknown / voided / already used
-      S->>D: Log failed attempt
-      S-->>C: 404 / 410 / 409
-    else unused
-      S->>D: BEGIN IMMEDIATE
-      S->>D: UPDATE codes SET redeemed WHERE status='unused'
-      Note over D: rowcount must be 1, else the other request won
-      S->>D: Add points + ledger row, COMMIT
-      S-->>C: +points
+    participant U as Customer
+    participant API as /api/redeem
+    participant DB as SQLite
+    U->>API: code
+    API->>API: account active? locked out? (events table)
+    API->>API: normalise + checksum (offline)
+    API->>DB: BEGIN IMMEDIATE
+    API->>DB: lookup HMAC(code) joined to batch + product
+    alt not found / voided / expired / used
+        API->>DB: ROLLBACK/COMMIT (nothing written)
+        API->>DB: log security_event (counts towards lockout)
+        API-->>U: error
+    else valid
+        API->>DB: UPDATE codes SET redeemed WHERE id=? AND status='unused'
+        API->>DB: INSERT ledger +points; UPDATE balance
+        API->>DB: COMMIT
+        API-->>U: points earned
     end
-  end
 ```
 
 ## Data model
-
 ```mermaid
 erDiagram
-  users ||--o{ ledger : "earns / spends"
-  users ||--o{ claims : makes
-  users ||--o{ attempts : "tries codes"
-  users |o--o{ codes : redeems
-  products ||--o{ batches : "printed as"
-  batches ||--|{ codes : contains
-  rewards ||--o{ claims : "claimed as"
-  users ||--o{ audit : "admin actions"
+    admins ||--o{ batches : created_by
+    products ||--o{ batches : "printed for"
+    batches ||--o{ codes : contains
+    customers ||--o{ codes : redeemed_by
+    customers ||--o{ point_ledger : has
+    customers ||--o{ claims : makes
+    rewards ||--o{ claims : "claimed as"
+    customers ||--o{ security_events : "triggers"
 
-  users { int id PK
-    text email UK
-    text password_hash
-    text role "customer|admin"
-    int points_balance "CHECK >= 0"
-    int lifetime_points
-    int blocked }
-  products { int id PK
-    text sku UK
-    text name
-    int points }
-  batches { int id PK
-    int product_id FK
-    int quantity
-    text status "active|voided" }
-  codes { int id PK
-    int batch_id FK
-    text serial UK
-    text code_hash UK "HMAC-SHA256"
-    text status "unused|redeemed|voided"
-    int redeemed_by FK }
-  ledger { int id PK
-    int user_id FK
-    int delta
-    text reason }
-  rewards { int id PK
-    text name
-    int cost
-    int stock "CHECK >= 0" }
-  claims { int id PK
-    int user_id FK
-    int reward_id FK
-    text status "pending|fulfilled|rejected" }
-  attempts { int id PK
-    int user_id FK
-    text ip
-    text outcome
-    text code_hash }
-  audit { int id PK
-    int actor_id FK
-    text action
-    text detail }
+    customers { int id PK  text email UK  int points_balance  text status }
+    products  { int id PK  text sku UK  int points  int active }
+    batches   { int id PK  int product_id FK  int quantity  text status  text expires_at }
+    codes     { int id PK  int batch_id FK  text code_hash UK  text status  int redeemed_by FK  text redeemed_at }
+    point_ledger { int id PK  int customer_id FK  int delta  text reason  int ref_id }
+    rewards   { int id PK  text name  int points_cost  int stock  int active }
+    claims    { int id PK  int customer_id FK  int reward_id FK  int points_spent  text status }
+    security_events { int id PK  text kind  int customer_id FK  text ip  text detail  text created_at }
 ```
 
-Full DDL: [`schema.sql`](schema.sql).
-
-## Fraud prevention: layers
-
-| Threat | Defence |
+## Fraud controls summary
+| Threat | Control |
 |---|---|
-| Reusing a code (same or different account) | Single atomic `UPDATE … WHERE status='unused'`. The `status` column and the `UNIQUE code_hash` live in the database, not in app memory. |
-| Two requests at the same instant | `BEGIN IMMEDIATE` serialises writers. Tested with 8 parallel requests: exactly one succeeds. |
-| Guessing codes | 60-bit random codes + 5 failures per 15 min per user + 20 per hour per IP. Even valid codes are refused while locked. |
-| Stolen database | Only keyed hashes of codes are stored. Passwords are salted hashes. |
-| Stolen or misprinted batch | Owner cancels unused codes in one click. |
-| Credential stuffing | 10 failed logins per IP per 15 min. |
-| Cross-site request forgery | `SameSite=Lax` cookie + required `X-Requested-With` header on every write. |
-| XSS | All dynamic text is HTML-escaped in the UI. Strict Content-Security-Policy (no inline scripts). |
-| Privilege escalation | Every `/api/admin/*` route uses `admin_required`. Tested: customers get 403, anonymous gets 401. |
-| Over-spending points / stock | Guarded `UPDATE … WHERE points_balance >= cost` and `stock > 0`, plus `CHECK` constraints. |
-| Detection | `attempts` table feeds the owner's **Fraud alerts** page: accounts with repeat failures, noisy IPs, codes many people try to reuse. `audit` records every owner action. |
+| Guessing codes | 31^12 random space, offline checksum, per-user and per-IP lockout, every failure logged |
+| Reusing a code (one or many accounts) | Atomic conditional `UPDATE`; second attempt gets 409 and is logged with who used it first |
+| Two simultaneous redemptions | `BEGIN IMMEDIATE` + conditional update; tested with 8 parallel requests |
+| Database leak | Codes stored only as keyed hashes |
+| Compromised or misprinted batch | Void batch; expiry dates |
+| Overspending points / overselling stock | Conditional updates in one transaction; tested concurrently |
+| Credential stuffing | Login throttling per IP; scrypt hashes |
+| CSRF / XSS | SameSite cookies, JSON-only writes, strict CSP, output escaping |
+| Suspicious accounts | Failure counts per customer, one-click suspend |
 
-## Database connection
-
-`db.py` opens one SQLite connection per request (`sqlite3.connect(DB_PATH)`, autocommit, `foreign_keys=ON`, WAL, 15 s busy timeout). `DB_PATH` comes from `.env`. Open the file with any SQLite viewer (for example *DB Browser for SQLite*) or `sqlite3 loyalty.db`.
-
-**Moving to PostgreSQL later:** only `db.py` and the `datetime('now')` / `date()` expressions in `app.py` and `schema.sql` are SQLite-specific. The rest is standard SQL. The atomic `UPDATE … WHERE status='unused'` pattern works unchanged in PostgreSQL.
-
-## Known limitations
-
-- SQLite allows one writer at a time. Fine for one factory; use PostgreSQL for very high traffic.
-- Behind a reverse proxy, configure the proxy to pass the real client IP (otherwise IP limits see the proxy's address).
-- No email verification or password reset yet.
-- A lost code CSV cannot be recovered by design.
+## Code layout
+```
+app/
+  __init__.py        app factory, headers, admin bootstrap
+  config.py          env vars + refuses placeholder secrets
+  db.py              connection, transaction() helper, schema init
+  schema.sql         tables and indexes
+  security.py        code generation/validation, hashing, lockout
+  routes_customer.py customer API
+  routes_admin.py    owner API
+  static/            customer.html, admin.html, app.css, *.js
+scripts/             init_env.py, seed_demo.py
+tests/               test_api.py
+```
