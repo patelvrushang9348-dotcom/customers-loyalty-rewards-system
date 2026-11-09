@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Box Rewards: Owner Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="tape"></div>
+<header class="top"><b>Box Rewards · Owner dashboard</b><button id="logout" class="ghost small hidden">Log out</button></header>
+<main class="wrap">
+
+<section id="login" class="narrow">
+  <div class="panel"><h2>Owner login</h2>
+    <form id="login-form">
+      <label for="u">Username</label><input id="u" autocomplete="username" required>
+      <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+      <p><button type="submit">Log in</button></p><div id="login-msg" class="msg" role="status"></div>
+    </form></div>
+</section>
+
+<section id="dash" class="hidden">
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view"></div>
+</section>
+</main>
+<script type="module" src="/static/admin.js"></script>
+</body>
+</html>
