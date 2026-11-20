@@ -2,7 +2,7 @@
 
 A loyalty system for a factory that sells products in boxes. Each box has a unique, single-use code printed inside. Customers enter the code to earn points and exchange points for rewards. The factory owner prints codes, manages the reward catalogue, fulfils claims and watches for fraud from a dashboard.
 
-**Deployed link:** _add yours here (e.g. Render / Railway / Fly.io) or remove this line._
+
 
 ## Features
 
